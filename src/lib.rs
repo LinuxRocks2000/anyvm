@@ -58,6 +58,7 @@
 
     // flow control
     64. branch: if the value in a specified register is 0, branch to a specified location. else, continue with the next operation.
+        location is an absolute op location
     65. call: call a function.
         there is no JMP instruction. this is because directly modifying the value of register 0 with addv is valid.
         call is preferable because it saves several instructions by pushing the correct return address to the stack for you.
@@ -80,10 +81,17 @@
     there are some gaps. these are reserved; eventually, they may contain floating-point instructions. As yet there is no floating-point support in anyvm.
 */
 use std::collections::HashMap;
-use std::ffi::CStr;
 
 mod numerical;
 use numerical::*;
+
+
+use std::fmt::Debug;
+mod invoke;
+
+
+mod error;
+use error::*;
 
 
 pub struct Image {
@@ -164,37 +172,6 @@ pub struct Machine {
 }
 
 
-#[derive(Debug, PartialEq)]
-pub enum InvokeResult {
-    Ok,
-    StdabiTestSuccess
-}
-
-
-#[derive(Debug, PartialEq)]
-pub enum MemoryErr { // errors specifically related to memory
-    OutOfMemory,
-    SegmentationFault // thrown if you try to do accesses below 0 or beyond the vm memory (rabbit addresses cannot be manipulated by most operations)
-}
-
-
-#[derive(Debug, PartialEq)]
-pub enum InvokeErr {
-    MemErr(MemoryErr),
-    BadInstruction,
-    StdabiTestFailure,
-    StringProcessingError // failed to build a null-terminated CStr
-}
-
-
-fn str_proc_fail<T>(_ : T) -> InvokeErr {
-    InvokeErr::StringProcessingError
-}
-
-
-type MemResult<T> = Result<T, MemoryErr>;
-
-
 impl Machine {
     pub fn new(capacity : usize) -> Machine {
         Machine {
@@ -260,6 +237,10 @@ impl Machine {
         Ok(unsafe {
             self.memory_as_at::<T>(pos)?[0].from_be()
         })
+    }
+
+    fn getreg_as<T : Numerical>(&mut self, reg : u8) -> T {
+        T::from_naive_u64(self.registers[reg as usize])
     }
 
     fn pop_arg<T : Numerical>(&mut self) -> MemResult<T> { // pop an arg
@@ -347,174 +328,52 @@ impl Machine {
         Ok(())
     }
 
-    pub fn invoke(&mut self, at : i64) -> Result<InvokeResult, InvokeErr> { // set up the stack and loop through operations until exit() is called
-        self.registers[0] = at as u64;
-        self.registers[1] = self.stack_start as u64;
-        loop {
-            let op = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
-            match op {
-                // pushv[l, i, s, b]
-                0 => { self.pusher::<u64>()?; }, // why, do you ask, did I choose this pattern?
-                1 => { self.pusher::<u32>()?; }, // you don't want to know.
-                2 => { self.pusher::<u16>()?; }, // useful for documentation purposes?
-                3 => { self.pusher::<u8>()?; },  // no. screw off. pretend I didn't do it this way.
-                // swap[l, i, s, b]
-                4 => { self.swapper::<u64>()?; },
-                5 => { self.swapper::<u32>()?; },
-                6 => { self.swapper::<u16>()?; },
-                7 => { self.swapper::<u8>()?; },
-                // pop[l, i, s, b]
-                8 => { self.popper::<u64>()?; },
-                9 => { self.popper::<u32>()?; },
-                10 => { self.popper::<u16>()?; },
-                11 => { self.popper::<u8>()?; },
-                // movv[l, i, s, b]
-                12 => { self.movver::<u64>()?; },
-                13 => { self.movver::<u32>()?; },
-                14 => { self.movver::<u16>()?; },
-                15 => { self.movver::<u8>()?; },
-                // movm[l, i, s, b]
-                16 => { self.movmer::<u64>()?; },
-                17 => { self.movmer::<u32>()?; },
-                18 => { self.movmer::<u16>()?; },
-                19 => { self.movmer::<u8>()?; },
-                // movr[l, i, s, b]
-                20 => { self.movrer::<u64>()?; },
-                21 => { self.movrer::<u32>()?; },
-                22 => { self.movrer::<u16>()?; },
-                23 => { self.movrer::<u8>()?; },
-                
-                // arithmetic
-                24 => { // add
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let reg2 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    self.registers[reg1] = self.registers[reg1] + self.registers[reg2];
-                },
-                25 => { // addv
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let val : u64 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1] = self.registers[reg1] + val;
-                },
-                26 => { // sub
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let reg2 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    self.registers[reg1] = self.registers[reg1] - self.registers[reg2];
-                },
-                27 => { // subv
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let val : u64 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1] = self.registers[reg1] - val;
-                },
-                28 => { // mul
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let reg2 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    self.registers[reg1] = self.registers[reg1] * self.registers[reg2];
-                },
-                29 => { // mulv
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let val : u64 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1] = self.registers[reg1] * val;
-                },
-                30 => { // div
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let reg2 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    self.registers[reg1] = self.registers[reg1] * self.registers[reg2];
-                },
-                31 => { // divv
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let val : u64 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1] = self.registers[reg1] / val;
-                },
-
-                // logical operations
-                // cmplt[l, i, s, b]
-                40 => { self.cmplter::<u64>()?; },
-                41 => { self.cmplter::<u32>()?; },
-                42 => { self.cmplter::<u16>()?; },
-                43 => { self.cmplter::<u8>()?; },
-
-                // cmpgt[l, i, s, b]
-                44 => { self.cmpgter::<u64>()?; },
-                45 => { self.cmpgter::<u32>()?; },
-                46 => { self.cmpgter::<u16>()?; },
-                47 => { self.cmpgter::<u8>()?; },
-
-                // cmplte[l, i, s, b]
-                48 => { self.cmplteer::<u64>()?; },
-                49 => { self.cmplteer::<u32>()?; },
-                50 => { self.cmplteer::<u16>()?; },
-                51 => { self.cmplteer::<u8>()?; },
-
-                // cmplte[l, i, s, b]
-                52 => { self.cmpgteer::<u64>()?; },
-                53 => { self.cmpgteer::<u32>()?; },
-                54 => { self.cmpgteer::<u16>()?; },
-                55 => { self.cmpgteer::<u8>()?; },
-
-                67 => { // invokevirtual
-                    let to_invoke = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    let rabbit = self.get_at_as::<i64>(to_invoke).map_err(InvokeErr::MemErr)?;
-                    let res = self.rabbit_fns[&rabbit].clone().call(self); // TODO: fix so we don't have to clone here [bad!]
-                    match res {
-                        Ok(InvokeResult::StdabiTestSuccess) | Err(_) => { return res; }, // if the abi call reports a successful test or an error, we want to exit now
-                        // if it wishes for the error to be accessible *inside* the vm, it'll use the internal stack like a good citizen
-                        Ok(_) => {}
-                    }
-                },
-                68 => { // dock
-                    let d_name_loc = self.pop_arg_addr().map_err(InvokeErr::MemErr)?;
-                    let d_name = CStr::from_bytes_until_nul(&self.memory[d_name_loc..]).map_err(str_proc_fail)?; // TODO: error handling
-                    if d_name.to_str().map_err(str_proc_fail)? == "stdabi" {
-                        let rabbit = self.next_rabbit();
-                        self.push(rabbit).map_err(InvokeErr::MemErr)?;
-                        self.rabbit_objs.insert(rabbit, RabbitTable {
-                            fns : HashMap::from([
-                                    (
-                                        "print".to_string(),
-                                        AbiFunction::new(|machine| {
-                                            let addr = machine.pop_addr().map_err(InvokeErr::MemErr)?;
-                                            machine.registers[1] += 8; // restore the popped address; the caller will want to pop off arguments itself
-                                            let string = CStr::from_bytes_until_nul(&machine.memory[addr..]).map_err(str_proc_fail)?.to_str().map_err(str_proc_fail)?.to_string();
-                                            print!("{}", string);
-                                            Ok(InvokeResult::Ok)
-                                        })
-                                    ),
-                                    (
-                                        "stest".to_string(),
-                                        AbiFunction::new(|machine| {
-                                            let addr = machine.pop_addr().map_err(InvokeErr::MemErr)?;
-                                            machine.registers[1] += 8; // restore the popped address; the caller will want to pop off arguments itself
-                                            let string = CStr::from_bytes_until_nul(&machine.memory[addr..]).map_err(str_proc_fail)?.to_str().map_err(str_proc_fail)?.to_string();
-                                            if string == "STDABI TEST" {
-                                                return Ok(InvokeResult::StdabiTestSuccess);
-                                            }
-                                            else {
-                                                return Err(InvokeErr::StdabiTestFailure);
-                                            }
-                                        })
-                                    )
-                                ]
-                            )
-                        });
-                    }
-                },
-                69 => { // load a function
-                    let root_rabbit = self.pop_as::<i64>().map_err(InvokeErr::MemErr)?;
-                    let d_name_ptr = self.pop_arg_addr().map_err(InvokeErr::MemErr)?;
-                    let d_name = CStr::from_bytes_until_nul(&self.memory[d_name_ptr..]).map_err(str_proc_fail)?.to_str().map_err(str_proc_fail)?.to_string();
-                    let r = self.next_rabbit();
-                    self.rabbit_fns.insert(r, self.rabbit_objs[&root_rabbit].fns[&d_name].clone());
-                    self.push(r).map_err(InvokeErr::MemErr)?;
-                },
-                70 => {
-                    break;
-                },
-                _ => {
-                    return Err(InvokeErr::BadInstruction);
-                }
-            }
+    fn cmplter<T : Numerical + TryFrom<i32>>(&mut self) -> Result<(), InvokeErr> where <T as TryFrom<i32>>::Error : Debug {
+        let reg : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
+        let regv : T = self.getreg_as(reg);
+        if regv < 0.try_into().unwrap() { // this is infallible
+            self.registers[reg as usize] = 1u64.to_be();
         }
-        Ok(InvokeResult::Ok)
+        else {
+            self.registers[reg as usize] = 0u64.to_be();
+        }
+        Ok(())
+    }
+
+    fn cmpgter<T : Numerical + TryFrom<i32>>(&mut self) -> Result<(), InvokeErr> where <T as TryFrom<i32>>::Error : Debug {
+        let reg : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
+        let regv : T = self.getreg_as(reg);
+        if regv > 0.try_into().unwrap() {
+            self.registers[reg as usize] = 1u64.to_be();
+        }
+        else {
+            self.registers[reg as usize] = 0u64.to_be();
+        }
+        Ok(())
+    }
+
+    fn cmplteer<T : Numerical + TryFrom<i32>>(&mut self) -> Result<(), InvokeErr> where <T as TryFrom<i32>>::Error : Debug {
+        let reg : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
+        let regv : T = self.getreg_as(reg);
+        if regv <= 0.try_into().unwrap() {
+            self.registers[reg as usize] = 1u64.to_be();
+        }
+        else {
+            self.registers[reg as usize] = 0u64.to_be();
+        }
+        Ok(())
+    }
+
+    fn cmpgteer<T : Numerical + TryFrom<i32>>(&mut self) -> Result<(), InvokeErr> where <T as TryFrom<i32>>::Error : Debug {
+        let reg : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
+        let regv : T = self.getreg_as(reg);
+        if regv >= 0.try_into().unwrap() {
+            self.registers[reg as usize] = 1u64.to_be();
+        }
+        else {
+            self.registers[reg as usize] = 0u64.to_be();
+        }
+        Ok(())
     }
 }
 
@@ -522,6 +381,7 @@ impl Machine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::invoke::*;
     #[test]
     fn abi_call() {
         let image = Image {
