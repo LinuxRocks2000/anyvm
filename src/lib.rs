@@ -94,6 +94,9 @@ mod error;
 use error::*;
 
 
+mod ir;
+
+
 pub struct Image {
     function_table : HashMap<String, i64>, // contains offsets into the text section.
     static_table : HashMap<String, i64>, // contains offsets into the static section
@@ -277,8 +280,8 @@ impl Machine {
         let one_val = self.get_at_as::<T>(one)?;
         let two_val = self.get_at_as::<T>(two)?;
         unsafe {
-            self.memory_as_at::<T>(self.stackaddr(one)?)?[0] = two_val;
-            self.memory_as_at::<T>(self.stackaddr(two)?)?[0] = one_val;
+            self.memory_as_at::<T>(self.stackaddr(one)?)?[0] = two_val.to_be();
+            self.memory_as_at::<T>(self.stackaddr(two)?)?[0] = one_val.to_be();
         }
         Ok(())
     }
@@ -323,7 +326,7 @@ impl Machine {
         let register : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
         let rbytes = self.registers[register as usize].to_be_bytes();
         for i in 0..T::BYTE_COUNT {
-            self.memory[addr + i] = rbytes[i + 7 - T::BYTE_COUNT];
+            self.memory[addr + i] = rbytes[i + 8 - T::BYTE_COUNT];
         }
         Ok(())
     }
@@ -382,6 +385,7 @@ impl Machine {
 mod tests {
     use super::*;
     use super::invoke::*;
+    use super::ir;
     #[test]
     fn abi_call() {
         let image = Image {
@@ -391,7 +395,7 @@ mod tests {
                                                                             // the stdabi rabbit
             text_section : vec![68, 0, 0, 0, 0, 0, 0, 0, 8, // dock, 8: load the stdabi
                                 69, 0, 0, 0, 0, 0, 0, 0, 15, // loadfun, 15: load the symbol "print" from the stdabi
-                                0 , 0, 0, 0, 0, 0, 0, 0, 21, // pushvi, 21
+                                0 , 0, 0, 0, 0, 0, 0, 0, 21, // pushvl, 21
                                 67, 255, 255, 255, 255, 255, 255, 255, 240, // invokevirtual, -16
                                 70] // exit
         };
@@ -401,15 +405,30 @@ mod tests {
     }
 
     #[test]
-    fn function_call() {
-        let image = Image {
-            function_table : HashMap::from([("main".to_string(), 0i64)]),
-            static_table : HashMap::new(),
-            static_section : Vec::from(b"hello, world\n"),
-            text_section : vec![]
-        };
+    fn ir_test() { // uses the IR compiler to run a program equivalent to above (although with an extra function call)
+        let image = ir::build(r#"
+=message bytes "STDABI TEST\0"
+=stdabi bytes "stdabi\0"
+=stest bytes "stest\0"
+=stest_rabbit word 0        ; reserved space for the print function we're loading from
+                            ; outside the VM
+.printout
+    pushvl 0                ; reserve space for the print function's argument
+    movml -24 2             ; move the argument passed to this function into register 2
+    movrl -8 2              ; copy the value of register 2 into the space we allocated above
+    invokevirtual $stest_rabbit
+    popl 2                  ; unwind the local section of the stack
+    ret
+.main export
+    dock $stdabi
+    loadfun $stest
+    swapl -8 $stest_rabbit  ; shove the rabbit function in the $print_rabbit location
+    pushvl $message         ; push the address of the message we're printing to stack
+    call $printout
+    exit
+        "#);
         let mut machine = Machine::new(1024); // these stupid little 1kb machines are unreasonably fun
         machine.mount(&image);
-        assert_eq!(machine.invoke(image.lookup("main".to_string())), Ok(InvokeResult::Ok));
+        assert_eq!(machine.invoke(image.lookup("main".to_string())), Ok(InvokeResult::StdabiTestSuccess));
     }
 }
