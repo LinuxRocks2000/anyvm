@@ -127,6 +127,21 @@ impl Operation {
             "exit" => {
                 out.push(70);
             },
+            "movvl" => {
+                out.push(12);
+                operations[0].cast("word").dump_into(f_tbl, s_tbl, out);
+                operations[1].cast("byte").dump_into(f_tbl, s_tbl, out);
+            },
+            "subv" => {
+                out.push(27);
+                operations[0].cast("byte").dump_into(f_tbl, s_tbl, out);
+                operations[1].cast("word").dump_into(f_tbl, s_tbl, out);
+            },
+            "branch" => {
+                out.push(64);
+                operations[0].cast("byte").dump_into(f_tbl, s_tbl, out);
+                operations[1].cast("signedword").dump_into(f_tbl, s_tbl, out);
+            }
             _ => {
                 panic!("invalid instruction {}", name);
             }
@@ -189,7 +204,6 @@ pub fn build(program : &str) -> Image {
             }
         }
     }
-    println!("got final ftable {:?} (full {:?})", public_fn_table, fn_table);
     Image {
         function_table : public_fn_table,
         static_table : public_static_table,

@@ -160,7 +160,6 @@ impl Machine {
                     // TODO: make this actually call virtual functions [right now it only calls rabbit functions]
                     let to_invoke = self.pop_arg().map_err(InvokeErr::MemErr)?;
                     let rabbit = self.get_at_as::<i64>(to_invoke).map_err(InvokeErr::MemErr)?;
-                    println!("invoking {}", rabbit);
                     let res = self.rabbit_fns[&rabbit].clone().call(self); // TODO: fix so we don't have to clone here [bad!]
                     match res {
                         Ok(InvokeResult::StdabiTestSuccess) | Err(_) => { return res; }, // if the abi call reports a successful test or an error, we want to exit now
@@ -217,7 +216,6 @@ impl Machine {
                     break;
                 },
                 _ => {
-                    println!("bad opcode {}", op);
                     return Err(InvokeErr::BadInstruction);
                 }
             }

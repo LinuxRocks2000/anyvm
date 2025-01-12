@@ -431,4 +431,34 @@ mod tests {
         machine.mount(&image);
         assert_eq!(machine.invoke(image.lookup("main".to_string())), Ok(InvokeResult::StdabiTestSuccess));
     }
+
+    #[test]
+    fn branch_test() {
+        let image = ir::build(r#"
+=test_success bytes "STDABI TEST\0"
+=test_failure bytes "FAILURE\0"
+=stdabi bytes "stdabi\0"
+=stest bytes "stest\0"
+=stest_rabbit word 0
+
+.success
+    pushvl $test_success
+    invokevirtual $stest_rabbit
+    exit
+
+.main export
+    dock $stdabi
+    loadfun $stest
+    swapl -8 $stest_rabbit
+    movvl 1 3
+    subv 3 1
+    branch 3 $success
+    pushvl $test_failure
+    invokevirtual $stest_rabbit
+    exit
+"#);
+        let mut machine = Machine::new(1024);
+        machine.mount(&image);
+        assert_eq!(machine.invoke(image.lookup("main".to_string())), Ok(InvokeResult::StdabiTestSuccess));
+    }
 }
