@@ -87,14 +87,15 @@ use numerical::*;
 
 
 use std::fmt::Debug;
-mod invoke;
+pub mod invoke;
 
 
-mod error;
+pub mod error;
 use error::*;
 
 
-mod ir;
+pub mod ir;
+pub mod avc;
 
 
 pub struct Image {
@@ -460,5 +461,23 @@ mod tests {
         let mut machine = Machine::new(1024);
         machine.mount(&image);
         assert_eq!(machine.invoke(image.lookup("main".to_string())), Ok(InvokeResult::StdabiTestSuccess));
+    }
+    #[test]
+    fn avc_test() {
+        let image = avc::build(r#"
+long stdabi;
+long stest;
+
+fn do_print() {
+    stest("STDABI TEST");
+}
+
+fn main() {
+    stdabi = @load_lib("stdabi");
+    stest = @load_fun(stdabi, "stest");
+    do_print();
+    @exit();
+}
+        "#);
     }
 }
