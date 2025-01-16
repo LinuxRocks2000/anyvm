@@ -388,7 +388,7 @@ mod tests {
     use super::invoke::*;
     use super::ir;
     #[test]
-    fn abi_call() {
+    fn abi_call() { // a simple abi call written in raw bytecode
         let image = Image {
             function_table : HashMap::from([("main".to_string(), 0i64)]),
             static_table : HashMap::new(),
