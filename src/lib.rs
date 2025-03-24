@@ -468,8 +468,12 @@ mod tests {
 long stdabi;
 long stest;
 
+fn getstr() -> &byte {
+    "STDABI TEST"
+}
+
 fn do_print() {
-    stest("STDABI TEST");
+    stest(getstr());
 }
 
 fn main() {
