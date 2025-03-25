@@ -12,111 +12,91 @@ impl Machine {
             let op = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
             match op {
                 // pushv[l, i, s, b]
-                0 => { self.pusher::<u64>()?; }, // why, do you ask, did I choose this pattern?
-                1 => { self.pusher::<u32>()?; }, // you don't want to know.
-                2 => { self.pusher::<u16>()?; }, // useful for documentation purposes?
-                3 => { self.pusher::<u8>()?; },  // no. screw off. pretend I didn't do it this way.
+                0 => { self.push::<u64>()?; }, // why, do you ask, did I choose this pattern?
+                1 => { self.push::<u32>()?; }, // you don't want to know.
+                2 => { self.push::<u16>()?; }, // useful for documentation purposes?
+                3 => { self.push::<u8>()?; },  // no. screw off. pretend I didn't do it this way.
+                // push[l, i, s, b]
+                4 => { self.pushv::<u64>()?; },
+                5 => { self.pushv::<u32>()?; },
+                6 => { self.pushv::<u16>()?; },
+                7 => { self.pushv::<u8>()?; },
                 // swap[l, i, s, b]
-                4 => { self.swapper::<u64>()?; },
-                5 => { self.swapper::<u32>()?; },
-                6 => { self.swapper::<u16>()?; },
-                7 => { self.swapper::<u8>()?; },
+                8 => { self.swap::<u64>()?; },
+                9 => { self.swap::<u32>()?; },
+                10 => { self.swap::<u16>()?; },
+                11 => { self.swap::<u8>()?; },
+                // cpy[l, i, s, b]
+                12 => { self.cpy::<u64>()?; },
+                13 => { self.cpy::<u32>()?; },
+                14 => { self.cpy::<u16>()?; },
+                15 => { self.cpy::<u8>()?; },
+                // cpyv[l, i, s, b]
+                16 => { self.cpyv::<u64>()?; },
+                17 => { self.cpyv::<u32>()?; },
+                18 => { self.cpyv::<u16>()?; },
+                19 => { self.cpyv::<u8>()?; },
                 // pop[l, i, s, b]
-                8 => { self.popper::<u64>()?; },
-                9 => { self.popper::<u32>()?; },
-                10 => { self.popper::<u16>()?; },
-                11 => { self.popper::<u8>()?; },
-                // movv[l, i, s, b]
-                12 => { self.movver::<u64>()?; },
-                13 => { self.movver::<u32>()?; },
-                14 => { self.movver::<u16>()?; },
-                15 => { self.movver::<u8>()?; },
-                // movm[l, i, s, b]
-                16 => { self.movmer::<u64>()?; },
-                17 => { self.movmer::<u32>()?; },
-                18 => { self.movmer::<u16>()?; },
-                19 => { self.movmer::<u8>()?; },
-                // movr[l, i, s, b]
-                20 => { self.movrer::<u64>()?; },
-                21 => { self.movrer::<u32>()?; },
-                22 => { self.movrer::<u16>()?; },
-                23 => { self.movrer::<u8>()?; },
+                20 => { self.pop::<u64>()?; },
+                21 => { self.pop::<u32>()?; },
+                22 => { self.pop::<u16>()?; },
+                23 => { self.pop::<u8>()?; },
+                // popm[l, i, s, b]
+                24 => { self.popm::<u64>()?; },
+                25 => { self.popm::<u32>()?; },
+                26 => { self.popm::<u16>()?; },
+                27 => { self.popm::<u8>()?; },
                 
                 // arithmetic
-                24 => { // add
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let reg2 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    self.registers[reg1] = self.registers[reg1] + self.registers[reg2];
-                },
-                25 => { // addv
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let val : u64 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1] = self.registers[reg1] + val;
-                },
-                26 => { // sub
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let reg2 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    self.registers[reg1] = self.registers[reg1] - self.registers[reg2];
-                },
-                27 => { // subv
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let val : u64 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1] = self.registers[reg1] - val;
-                },
-                28 => { // mul
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let reg2 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    self.registers[reg1] = self.registers[reg1] * self.registers[reg2];
-                },
-                29 => { // mulv
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let val : u64 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1] = self.registers[reg1] * val;
-                },
-                30 => { // div
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let reg2 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    self.registers[reg1] = self.registers[reg1] * self.registers[reg2];
-                },
-                31 => { // divv
-                    let reg1 : usize = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)? as usize;
-                    let val : u64 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1] = self.registers[reg1] / val;
-                },
+                // add
+                28 => { self.add::<u64>()?; },
+                29 => { self.add::<u32>()?; },
+                30 => { self.add::<u16>()?; },
+                31 => { self.add::<u8>()?; },
+
+                // sub
+                32 => { self.sub::<u64>()?; },
+                33 => { self.sub::<u32>()?; },
+                34 => { self.sub::<u16>()?; },
+                35 => { self.sub::<u8>()?; },
+
+                // mul
+                36 => { self.mul::<u64>()?; },
+                37 => { self.mul::<u32>()?; },
+                38 => { self.mul::<u16>()?; },
+                39 => { self.mul::<u8>()?; },
+
+                // div
+                40 => { self.div::<u64>()?; },
+                41 => { self.div::<u32>()?; },
+                42 => { self.div::<u16>()?; },
+                43 => { self.div::<u8>()?; },
 
                 // logical operations
-                // cmplt[l, i, s, b]
-                40 => { self.cmplter::<u64>()?; },
-                41 => { self.cmplter::<u32>()?; },
-                42 => { self.cmplter::<u16>()?; },
-                43 => { self.cmplter::<u8>()?; },
-
-                // cmpgt[l, i, s, b]
-                44 => { self.cmpgter::<u64>()?; },
-                45 => { self.cmpgter::<u32>()?; },
-                46 => { self.cmpgter::<u16>()?; },
-                47 => { self.cmpgter::<u8>()?; },
-
-                // cmplte[l, i, s, b]
-                48 => { self.cmplteer::<u64>()?; },
-                49 => { self.cmplteer::<u32>()?; },
-                50 => { self.cmplteer::<u16>()?; },
-                51 => { self.cmplteer::<u8>()?; },
-
-                // cmplte[l, i, s, b]
-                52 => { self.cmpgteer::<u64>()?; },
-                53 => { self.cmpgteer::<u32>()?; },
-                54 => { self.cmpgteer::<u16>()?; },
-                55 => { self.cmpgteer::<u8>()?; },
                 
-                56 => { // not
-                    let reg = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
-                    if self.getreg_as::<u64>(reg) == 0 {
-                        self.registers[reg as usize] = 1;
-                    }
-                    else {
-                        self.registers[reg as usize] = 0;
-                    }
+                // cmp[l, i, s, b]
+                44 => { self.cmp::<u64>()?; },
+                45 => { self.cmp::<u32>()?; },
+                46 => { self.cmp::<u16>()?; },
+                47 => { self.cmp::<u8>()?; },
+                
+                // cmpv[l, i, s, b]
+                48 => { self.cmpv::<u64>()?; },
+                49 => { self.cmpv::<u32>()?; },
+                50 => { self.cmpv::<u16>()?; },
+                51 => { self.cmpv::<u8>()?; },
+                
+                52 => { // bnot
+                    let loc = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
+                    let val = self.get_at_as::<u8>(loc).map_err(InvokeErr::MemErr)?;
+                    self.setmem(loc, !val).map_err(InvokeErr::MemErr)?;
+                    Ok(())
+                },
+                53 => { // not
+                    let loc = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
+                    let val = self.get_at_as::<u8>(loc).map_err(InvokeErr::MemErr)?;
+                    self.setmem(loc, if val == 0 { 1 } else { 0 }).map_err(InvokeErr::MemErr)?;
+                    Ok(())
                 },
                 57 => { // or
                     let reg1 = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
