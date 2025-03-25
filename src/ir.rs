@@ -126,6 +126,7 @@ impl Operation {
             },
             "exit" => {
                 out.push(70);
+                operations[0].cast("signedword").dump_into(f_tbl, s_tbl, out);
             },
             "movvl" => {
                 out.push(12);

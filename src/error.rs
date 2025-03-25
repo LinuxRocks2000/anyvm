@@ -1,9 +1,9 @@
-// error handling stuff
+// error handling and fallable return values stuff
 
 
 #[derive(Debug, PartialEq)]
 pub enum InvokeResult {
-    Ok,
+    Ok(i64),
     StdabiTestSuccess
 }
 

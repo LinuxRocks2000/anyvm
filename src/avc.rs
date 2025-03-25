@@ -40,7 +40,6 @@ enum Command {
 
 #[derive(Debug)]
 enum TopLevel {
-    FunctionDefinition(String, Vec<Variable>, Type, Vec<Command>),
     StaticDefinition(Variable),
     Export(String),
     ExportFn(String)
@@ -63,6 +62,7 @@ enum Expression {
     Number(i64),
     NtString(String), // null terminated string
     Function(Vec<Variable>, Vec<Command>), // arguments, functions
+    Sref(i64), // reference to a location in the static table
 }
 
 
@@ -141,26 +141,92 @@ fn parser() -> impl Parser<char, Vec<TopLevel>, Error=Simple<char>> {
 }
 
 
+struct ImageBuilder {
+    static_section : Vec<u8>,
+    text_section : Vec<u8>,
+    static_table : HashMap<String, i64>,
+    function_table : HashMap<String, i64>,
+    pub_st_table : HashMap<String, i64>,
+    pub_fn_table : HashMap<String, i64>
+}
+
+
+impl ImageBuilder {
+    fn new() -> Self {
+        Self {
+            static_section : Vec::new(),
+            text_section : Vec::new(),
+            static_table : HashMap::new(),
+            function_table : HashMap::new(),
+            pub_st_table : HashMap::new(),
+            pub_fn_table : HashMap::new()
+        }
+    }
+
+    fn build(&mut self, program : &mut Vec<TopLevel>) {
+        println!("program: {:?}", program);
+        for statement in program {
+            statement.static_collapse(self);
+        }
+    }
+
+    fn into_image(self) -> Image {
+        Image {
+            function_table : self.pub_fn_table,
+            text_section : self.text_section,
+            static_table : self.pub_st_table,
+            static_section : self.static_section
+        }
+    }
+}
+
+
+impl TopLevel {
+    fn static_collapse(&mut self, image : &mut ImageBuilder) { // fill a static table
+        let static_pointer = image.static_section.len();
+        match self {
+            Self::StaticDefinition(var) => {
+                if let Some(v) = &var.v {
+                    v.insert_static(image);
+                }
+                var.v = Some(Expression::Sref(static_pointer as i64));
+            },
+            _ => {}
+        }
+    }
+}
+
+
+impl Expression {
+    fn insert_static(&self, image : &mut ImageBuilder) {
+        match self {
+            Self::Number(i) => {
+                image.static_section.extend(i.to_be_bytes());
+            },
+            Self::NtString(s) => {
+                image.static_section.extend(s.as_bytes());
+                image.static_section.extend(s.len().to_be_bytes());
+            }
+            Self::Function(_, program) => {
+                
+            },
+            Self::Sref(to) => {}
+        }
+    }
+}
+
+
 pub fn build(program : &str) -> Image {
-    let irast = parser().parse(r#"
+    let mut irast = parser().parse(r#"
     long varname = 80
     long main = {
         print("Test message!")
     }
     export function main
     "#).unwrap();
-    let mut public_fn_table = HashMap::new();
-    let public_static_table = HashMap::new();
-    let mut fn_table : HashMap<String, i64> = HashMap::new();
-    let mut text_section = Vec::new();
-    let mut static_table : HashMap<String, i64> = HashMap::new();
-    let mut static_section = Vec::new();
-    irast.static_reduce(&mut static_section, &mut static_table);
 
-    Image {
-        function_table : public_fn_table,
-        static_table : public_static_table,
-        static_section,
-        text_section
-    }
+    let mut builder = ImageBuilder::new();
+    builder.build(&mut irast);
+    println!("nazi: {:?}", builder.static_section);
+    builder.into_image()
 }

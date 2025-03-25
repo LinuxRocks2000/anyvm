@@ -1,0 +1,12 @@
+[default]
+name=Default
+runtime=podman:7ecdd5cd8eadce53e1287345138403cc59cfe548f755bbad10b81dca0b410761
+toolchain=default
+config-opts=
+run-opts=
+prefix=/var/home/awesome/Projects/.gnome-builder/projects/anyvm/install/podman-7ecdd5cd8eadce53e1287345138403cc59cfe548f755bbad10b81dca0b410761
+app-id=
+postbuild=
+prebuild=
+run-command=
+default=true

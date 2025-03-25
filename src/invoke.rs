@@ -162,7 +162,7 @@ impl Machine {
                                             machine.registers[1] += 8; // restore the popped address; the caller will want to pop off arguments itself
                                             let string = CStr::from_bytes_until_nul(&machine.memory[addr..]).map_err(str_proc_fail)?.to_str().map_err(str_proc_fail)?.to_string();
                                             print!("{}", string);
-                                            Ok(InvokeResult::Ok)
+                                            Ok(InvokeResult::Ok(0))
                                         })
                                     ),
                                     (
@@ -193,13 +193,14 @@ impl Machine {
                     self.push(r).map_err(InvokeErr::MemErr)?;
                 },
                 70 => {
-                    break;
+                    let out = self.pop_as::<i64>().map_err(InvokeErr::MemErr)?;
+                    return Ok(InvokeResult::Ok(out));
                 },
                 _ => {
                     return Err(InvokeErr::BadInstruction);
                 }
             }
         }
-        Ok(InvokeResult::Ok)
+        Ok(InvokeResult::Ok(0))
     }
 }

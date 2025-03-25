@@ -501,7 +501,7 @@ mod tests {
     swapl -8 $stest_rabbit  ; shove the rabbit function in the $print_rabbit location
     pushvl $message         ; push the address of the message we're printing to stack
     call $printout
-    exit
+    exit 0
         "#);
         let mut machine = Machine::new(1024); // these stupid little 1kb machines are unreasonably fun
         machine.mount(&image);
@@ -520,7 +520,7 @@ mod tests {
 .success
     pushvl $test_success
     invokevirtual $stest_rabbit
-    exit
+    exit 0
 
 .main export
     dock $stdabi
@@ -531,12 +531,24 @@ mod tests {
     branch 3 $success
     pushvl $test_failure
     invokevirtual $stest_rabbit
-    exit
+    exit 0
 "#);
         let mut machine = Machine::new(1024);
         machine.mount(&image);
         assert_eq!(machine.invoke(image.lookup("main".to_string())), Ok(InvokeResult::StdabiTestSuccess));
     }
+
+    #[test]
+    fn exit_value_test() {
+        let image = ir::build(r#"
+.main export
+        exit 1234
+"#);
+        let mut machine = Machine::new(1024);
+        machine.mount(&image);
+        assert_eq!(machine.invoke(image.lookup("main".to_string())), Ok(InvokeResult::Ok(1234)));
+    }
+
     #[test]
     fn avc_test() {
         let image = avc::build(r#"
@@ -558,5 +570,8 @@ fn main() {
     @exit();
 }
         "#);
+        let mut machine = Machine::new(2048);
+        machine.mount(&image);
+        let output = machine.invoke(image.lookup("main".to_string()));
     }
 }
