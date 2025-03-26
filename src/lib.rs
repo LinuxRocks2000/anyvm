@@ -65,7 +65,7 @@
     63. jmp: Increment or decrement the execution pointer by the signed 64-bit int argument.
     64. branch: if the value in a specified register is 0, branch to a specified location. else, continue with the next operation.
         location is an absolute op location
-    65. call: call a function: it's like jmp, but it pushes a return address to stack first.
+    65. call: call a function: absolute version of jmp, but it pushes a return address to stack first.
         you have to push the arguments to stack *before* `call`ing, and the function must still handle stack allocating its own local variables.
         the first stack push a caller makes should be reserving space for the function's return value, if any.
     66. ret: return from a function. expects the top value on the stack to be the return address - that is, the callee function has to unwind the stack down to the return address
@@ -110,8 +110,8 @@
     73. exit: exit the VM
     74. startmmu: start the MMU. this will create a page table at the end of the memory block. it's possible to do allocations without mmu
         just by directly editing memory, but using the mmu is better.
-        startmmu requires a page size in bytes. (the machine memory must be divisible by it, or this will throw an exception).
-        larger page sizes means more wasted memory from each alloc call, but also means a smaller page table; choose wisely.
+        startmmu requires a page size in bytes. larger page sizes means more wasted memory from each alloc
+        call, but also means a smaller page table and less likelihood of having to move memory on realloc; choose wisely.
     75. alloc: allocate some bytes in VM memory. pops the (64-bit) number of bytes from stack and pushes the pointer.
         alloc may use (much) more memory than requested based on the page size.
     76. dealloc: free some bytes. pops the address from stack. must be page-aligned. you do not have to pass the length.
@@ -145,6 +145,8 @@
         deltbl will always free the memory in the table. If the data is a function it will not attempt to free the function. If the data is a string,
         it will free the string. If the data is a table, it will call freetbl.
     82. freetbl: delete every item in a table and free the table itself.
+    83. updstck: change the stack pointer by an amount.
+        TODO: move this near push and pop
 
     As yet there is no "native" floating-point support in anyvm.
 
@@ -205,6 +207,7 @@ pub struct Machine {
     ext_data : Vec<ExtData>,
     stack_pointer : i64,
     exec_pointer : i64,
+    errcode : u8,
     sbm : (i64, i64) // (stack, exec): stack break marker
 }
 
@@ -219,7 +222,8 @@ impl Machine {
             ext_data : vec![],
             stack_pointer : 0,
             exec_pointer : 0,
-            sbm : (0, 0)
+            sbm : (0, 0),
+            errcode : 0
         }
     }
 
@@ -235,8 +239,6 @@ impl Machine {
         }
         self.text_start = image.static_section.len() as i64;
         self.stack_start = self.text_start + image.text_section.len() as i64;
-        // initialize stack pointer to the start of the stack space
-        self.stack_pointer = self.stack_start + image.static_section.len() as i64 + 1;
     }
 
     unsafe fn memory_as_at<'t, T>(&'t mut self, pos : usize) -> MemResult<&'t mut [T]> {
@@ -407,7 +409,7 @@ impl Machine {
         Ok(())
     }
 
-    fn cmplter<T : Numerical + TryFrom<i32>>(&mut self) -> Result<(), InvokeErr> where <T as TryFrom<i32>>::Error : Debug {
+    fn cmp<T : Numerical + TryFrom<i32>>(&mut self) -> Result<(), InvokeErr> where <T as TryFrom<i32>>::Error : Debug {
         let reg : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
         let regv : T = self.getreg_as(reg);
         if regv < 0.try_into().unwrap() { // this is infallible
@@ -419,40 +421,33 @@ impl Machine {
         Ok(())
     }
 
-    fn cmpgter<T : Numerical + TryFrom<i32>>(&mut self) -> Result<(), InvokeErr> where <T as TryFrom<i32>>::Error : Debug {
-        let reg : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-        let regv : T = self.getreg_as(reg);
-        if regv > 0.try_into().unwrap() {
-            self.registers[reg as usize] = 1u64.to_be();
+    fn shift<T : Numerical>(&mut self) -> Result<(), InvokeErr> {
+        let loc : i64 = self.pop_arg().map_err(InvokeErr::MemErr)?;
+        let val : T = self.get_at_as(loc).map_err(InvokeErr::MemErr)?;
+        let amount : i8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
+        if amount < 0 {
+            self.setmem(loc, val << -amount).map_err(InvokeErr::MemErr)?;
         }
-        else {
-            self.registers[reg as usize] = 0u64.to_be();
+        else if amount > 0 {
+            self.setmem(loc, val >> amount).map_err(InvokeErr::MemErr)?;
         }
-        Ok(())
     }
 
-    fn cmplteer<T : Numerical + TryFrom<i32>>(&mut self) -> Result<(), InvokeErr> where <T as TryFrom<i32>>::Error : Debug {
-        let reg : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-        let regv : T = self.getreg_as(reg);
-        if regv <= 0.try_into().unwrap() {
-            self.registers[reg as usize] = 1u64.to_be();
+    fn throw(&mut self, code : u8) {
+        self.errcode = code;
+        if self.sbm.0 != 0 || self.sbm.1 != 0 {
+            self.stack_pointer = self.sbm.0 + 16;
+            self.exec_pointer = self.sbm.1;
+            self.sbm.1 = self.pop_as();
+            self.sbm.0 = self.pop_as();
         }
         else {
-            self.registers[reg as usize] = 0u64.to_be();
+            todo!("handle throws with 0 sbm correctly");
         }
-        Ok(())
     }
 
-    fn cmpgteer<T : Numerical + TryFrom<i32>>(&mut self) -> Result<(), InvokeErr> where <T as TryFrom<i32>>::Error : Debug {
-        let reg : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-        let regv : T = self.getreg_as(reg);
-        if regv >= 0.try_into().unwrap() {
-            self.registers[reg as usize] = 1u64.to_be();
-        }
-        else {
-            self.registers[reg as usize] = 0u64.to_be();
-        }
-        Ok(())
+    fn start_mmu(&mut self, pagesize : u32) {
+        // start the builtin mmu.
     }
 }
 

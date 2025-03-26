@@ -6,10 +6,12 @@ use std::collections::HashMap;
 
 impl Machine {
     pub fn invoke(&mut self, at : i64) -> Result<InvokeResult, InvokeErr> { // set up the stack and loop through operations until exit() is called
-        self.registers[0] = at as u64;
-        self.registers[1] = self.stack_start as u64;
+        self.exec_pointer = at as u64;
+        self.stack_pointer = self.stack_start as u64;
         loop {
             let op = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
+            let old_errcode = self.errcode;
+            self.errcode = 0;
             match op {
                 // pushv[l, i, s, b]
                 0 => { self.push::<u64>()?; }, // why, do you ask, did I choose this pattern?
@@ -98,103 +100,102 @@ impl Machine {
                     self.setmem(loc, if val == 0 { 1 } else { 0 }).map_err(InvokeErr::MemErr)?;
                     Ok(())
                 },
-                57 => { // or
-                    let reg1 = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
-                    let reg2 = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1 as usize] = self.getreg_as::<u64>(reg1) | self.getreg_as::<u64>(reg2);
+                54 => { // bor
+                    let loc1 = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
+                    let val1 = self.get_at_as::<u8>(loc1).map_err(InvokeErr::MemErr)?;
+                    let loc2 = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
+                    let val2 = self.get_at_as::<u8>(loc2).map_err(InvokeErr::MemErr)?;
+                    self.setmem(loc1, val1 | val2).map_err(InvokeErr::MemErr)?;
                 },
-                58 => { // and
-                    let reg1 = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
-                    let reg2 = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1 as usize] = self.getreg_as::<u64>(reg1) & self.getreg_as::<u64>(reg2);
+                55 => { // vor
+                    let loc1 = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
+                    let val1 = self.get_at_as::<u8>(loc1).map_err(InvokeErr::MemErr)?;
+                    let val2 = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
+                    self.setmem(loc1, val1 | val2).map_err(InvokeErr::MemErr)?;
                 },
-                59 => { // or
-                    let reg1 = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
-                    let reg2 = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
-                    self.registers[reg1 as usize] = self.getreg_as::<u64>(reg1) ^ self.getreg_as::<u64>(reg2);
+                56 => { // band
+                    let loc1 = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
+                    let val1 = self.get_at_as::<u8>(loc1).map_err(InvokeErr::MemErr)?;
+                    let loc2 = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
+                    let val2 = self.get_at_as::<u8>(loc2).map_err(InvokeErr::MemErr)?;
+                    self.setmem(loc1, val1 & val2).map_err(InvokeErr::MemErr)?;
+                },
+                57 => { // vand
+                    let loc1 = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
+                    let val1 = self.get_at_as::<u8>(loc1).map_err(InvokeErr::MemErr)?;
+                    let val2 = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
+                    self.setmem(loc1, val1 & val2).map_err(InvokeErr::MemErr)?;
+                },
+                58 => { self.shift::<u64>()?; },
+                59 => { self.shift::<u32>()?; },
+                60 => { self.shift::<u16>()?; },
+                61 => { self.shift::<u8>()?; },
+                62 => {
+                    let loc = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
+                    let val : u8 = self.get_at_as(loc).map_err(InvokeErr::MemErr)?;
+                    self.setmem::<u8>(loc, if val == 0 { 0 } else { 1 });
+                },
+                63 => {
+                    let amnt : i64 = self.pop_arg();
+                    self.exec_pointer += amnt;
                 },
 
                 // flow control
                 64 => { // branch
-                    let reg = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
-                    let pos = self.pop_arg::<u64>().map_err(InvokeErr::MemErr)?;
-                    if self.registers[reg as usize] == 0 {
-                        self.registers[0] = pos;
+                    let val = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
+                    if val == 0 {
+                        self.exec_pointer = pos;
                     }
                 },
                 65 => { // call
                     let addr = self.pop_arg::<u64>().map_err(InvokeErr::MemErr)?;
-                    self.push(self.registers[0]).map_err(InvokeErr::MemErr)?; // push the return address.
+                    self.push(self.exec_pointer).map_err(InvokeErr::MemErr)?; // push the return address.
                     // the stack frame should now look like [return value space] [arguments] [return address].
                     // the first thing the called function should do upon being invoked is increment the stack
                     // so it looks like [return value space] [arguments] [return address] [locals]
-                    self.registers[0] = addr;
+                    self.exec_pointer = addr;
                 },
                 66 => { // ret
                     // the called function should have already decremented the stack so [return address]
                     // is the highest value on it.
                     let ret_addr = self.pop_as::<u64>().map_err(InvokeErr::MemErr)?;
-                    self.registers[0] = ret_addr;
+                    self.exec_pointer = ret_addr;
                 },
                 67 => { // invokevirtual
-                    // TODO: make this actually call virtual functions [right now it only calls rabbit functions]
-                    let to_invoke = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    let rabbit = self.get_at_as::<i64>(to_invoke).map_err(InvokeErr::MemErr)?;
-                    let res = self.rabbit_fns[&rabbit].clone().call(self); // TODO: fix so we don't have to clone here [bad!]
-                    match res {
-                        Ok(InvokeResult::StdabiTestSuccess) | Err(_) => { return res; }, // if the abi call reports a successful test or an error, we want to exit now
-                        // if it wishes for the error to be accessible *inside* the vm, it'll use the internal stack like a good citizen
-                        Ok(_) => {}
+                    let loc : i64 = self.pop_arg().map_err(InvokeErr::MemErr)?;
+                    let place : i64 = self.get_at_as(loc).map_err(InvokeErr:MemErr)?;
+                    self.push(self.exec_pointer).map_err(InvokeErr::MemErr)?;
+                    self.exec_pointer = place;
+                },
+                68 => {
+                    // TODO: invokeext
+                },
+                69 => { // setsbm
+                    self.push(self.sbm.0).map_err(InvokeErr::MemErr)?;
+                    self.push(self.sbm.1).map_err(InvokeErr::MemErr)?;
+                    self.sbm = (self.stack_pointer, self.exec_pointer + 9);
+                },
+                70 => { // throw
+                    let code : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
+                    self.throw(code);
+                },
+                71 => { // checkerr
+                    let target : i64 = self.pop_arg();
+                    if old_errcode != 0 {
+                        self.errcode = old_errcode;
+                        self.exec_pointer = target;
                     }
                 },
-                68 => { // dock
-                    let d_name_loc = self.pop_arg_addr().map_err(InvokeErr::MemErr)?;
-                    let d_name = CStr::from_bytes_until_nul(&self.memory[d_name_loc..]).map_err(str_proc_fail)?; // TODO: error handling
-                    if d_name.to_str().map_err(str_proc_fail)? == "stdabi" {
-                        let rabbit = self.next_rabbit();
-                        self.push(rabbit).map_err(InvokeErr::MemErr)?;
-                        self.rabbit_objs.insert(rabbit, RabbitTable {
-                            fns : HashMap::from([
-                                    (
-                                        "print".to_string(),
-                                        AbiFunction::new(|machine| {
-                                            let addr = machine.pop_addr().map_err(InvokeErr::MemErr)?;
-                                            machine.registers[1] += 8; // restore the popped address; the caller will want to pop off arguments itself
-                                            let string = CStr::from_bytes_until_nul(&machine.memory[addr..]).map_err(str_proc_fail)?.to_str().map_err(str_proc_fail)?.to_string();
-                                            print!("{}", string);
-                                            Ok(InvokeResult::Ok(0))
-                                        })
-                                    ),
-                                    (
-                                        "stest".to_string(),
-                                        AbiFunction::new(|machine| {
-                                            let addr = machine.pop_addr().map_err(InvokeErr::MemErr)?;
-                                            machine.registers[1] += 8; // restore the popped address; the caller will want to pop off arguments itself
-                                            let string = CStr::from_bytes_until_nul(&machine.memory[addr..]).map_err(str_proc_fail)?.to_str().map_err(str_proc_fail)?.to_string();
-                                            if string == "STDABI TEST" {
-                                                return Ok(InvokeResult::StdabiTestSuccess);
-                                            }
-                                            else {
-                                                return Err(InvokeErr::StdabiTestFailure);
-                                            }
-                                        })
-                                    )
-                                ]
-                            )
-                        });
-                    }
-                },
-                69 => { // load a function
-                    let root_rabbit = self.pop_as::<i64>().map_err(InvokeErr::MemErr)?;
-                    let d_name_ptr = self.pop_arg_addr().map_err(InvokeErr::MemErr)?;
-                    let d_name = CStr::from_bytes_until_nul(&self.memory[d_name_ptr..]).map_err(str_proc_fail)?.to_str().map_err(str_proc_fail)?.to_string();
-                    let r = self.next_rabbit();
-                    self.rabbit_fns.insert(r, self.rabbit_objs[&root_rabbit].fns[&d_name].clone());
-                    self.push(r).map_err(InvokeErr::MemErr)?;
-                },
-                70 => {
-                    let out = self.pop_as::<i64>().map_err(InvokeErr::MemErr)?;
+                72 => { // geterr
+                    self.push_as(old_errcode);
+                }
+                73 => { // exit
+                    let out = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
                     return Ok(InvokeResult::Ok(out));
+                },
+                74 => {
+                    let pagesize = self.pop_arg::<u32>().map_err(InvokeErr::MemErr);
+                    self.start_mmu(pagesize);
                 },
                 _ => {
                     return Err(InvokeErr::BadInstruction);
