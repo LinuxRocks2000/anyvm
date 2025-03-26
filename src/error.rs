@@ -18,6 +18,7 @@ pub enum MemoryErr { // errors specifically related to memory
 #[derive(Debug, PartialEq)]
 pub enum InvokeErr {
     MemErr(MemoryErr),
+    UncaughtThrow(u8),
     BadInstruction,
     StdabiTestFailure,
     StringProcessingError // failed to build a null-terminated CStr

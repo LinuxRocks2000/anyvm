@@ -126,16 +126,17 @@ impl Machine {
                     let val2 = self.pop_arg::<u8>().map_err(InvokeErr::MemErr)?;
                     self.setmem(loc1, val1 & val2).map_err(InvokeErr::MemErr)?;
                 },
+                // shift[l, i, s, b]
                 58 => { self.shift::<u64>()?; },
                 59 => { self.shift::<u32>()?; },
                 60 => { self.shift::<u16>()?; },
                 61 => { self.shift::<u8>()?; },
-                62 => {
+                62 => { // bnorm
                     let loc = self.pop_arg::<i64>().map_err(InvokeErr::MemErr)?;
                     let val : u8 = self.get_at_as(loc).map_err(InvokeErr::MemErr)?;
                     self.setmem::<u8>(loc, if val == 0 { 0 } else { 1 });
                 },
-                63 => {
+                63 => { // jmp
                     let amnt : i64 = self.pop_arg();
                     self.exec_pointer += amnt;
                 },
@@ -169,6 +170,10 @@ impl Machine {
                 },
                 68 => {
                     // TODO: invokeext
+                    // grab a function id from memory,
+                    // check if that function id is mapped into the current machine,
+                    // if it is, setsbm and invoke that function
+                    // if it isn't, throw.
                 },
                 69 => { // setsbm
                     self.push(self.sbm.0).map_err(InvokeErr::MemErr)?;
@@ -177,7 +182,7 @@ impl Machine {
                 },
                 70 => { // throw
                     let code : u8 = self.pop_arg().map_err(InvokeErr::MemErr)?;
-                    self.throw(code);
+                    self.throw(code)?;
                 },
                 71 => { // checkerr
                     let target : i64 = self.pop_arg();
@@ -185,6 +190,8 @@ impl Machine {
                         self.errcode = old_errcode;
                         self.exec_pointer = target;
                     }
+                    self.sbm.1 = self.pop_as(); // pop sbm off stack
+                    self.sbm.0 = self.pop_as();
                 },
                 72 => { // geterr
                     self.push_as(old_errcode);

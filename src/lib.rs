@@ -72,6 +72,8 @@
         before calling ret.
     67. invokevirtual: `call`, except it dereferences the argument to a 64-bit value somewhere in memory.
     68. invokeext: invoke an external function (loaded by way of a table)
+        To avoid bad recursions, invokeext ALWAYS sets sbm to 0. Attempting to use invokeext
+        without checkerr will lead to undefined behavior.
     69. setsbm: set a stack break marker. this will push the previous value of the sbm pointer to stack (0 if there is no current sbm)
         meant to be used in conjunction with checkerr.
         the sbm is actually two pointers: the execution pointer and the stack pointer. this means it takes up 16 bytes in memory.
@@ -83,6 +85,7 @@
         the default SBM is all 0s.
     70. throw: throw an error. accepts an 8-bit error reason. throw is mostly used by the ABI in situations where a proper error handler would not work.
         when an error is thrown, the stack and execution pointer are rewound to SBM, and the SBM is reset to the SBM pushed on the top of the stack.
+        The sbm is not popped off the stack; it should be popped off with checkerr.
         If the SBM is all 0, this will fully abort the vm.
         error codes:
          0: nerr; no error occurred, why are you geterr'ing?
@@ -104,6 +107,7 @@
 
         The thrown error code will be saved until the next instruction. The only instruction that will not overwrite the error code is checkerr.
     71. checkerr: if an error was thrown (error code is nonzero), jump to the specified location. Otherwise, continue to the next instruction.
+        checkerr pops the SBM off the stack.
     72. geterr: push the last thrown error code to stack.
 
     // vm commands
@@ -433,17 +437,17 @@ impl Machine {
         }
     }
 
-    fn throw(&mut self, code : u8) {
+    fn throw(&mut self, code : u8) -> Result<(), InvokeErr> {
         self.errcode = code;
         if self.sbm.0 != 0 || self.sbm.1 != 0 {
             self.stack_pointer = self.sbm.0 + 16;
             self.exec_pointer = self.sbm.1;
-            self.sbm.1 = self.pop_as();
-            self.sbm.0 = self.pop_as();
+            // doesn't remove the old sbm from stack; this must be done via checkerr.
         }
         else {
-            todo!("handle throws with 0 sbm correctly");
+            return Err(InvokeErr::UncaughtThrow);
         }
+        Ok(())
     }
 
     fn start_mmu(&mut self, pagesize : u32) {
